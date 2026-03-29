@@ -180,14 +180,16 @@ fn parse_lsof_output(output: &str) -> Result<Vec<ProcessInfo>, Error> {
                 }
             }
             "f" => {
-                // 新的 fd 条目：先保存前一个
-                flush_process(
-                    &mut results,
-                    &current_pid,
-                    &current_name,
-                    &current_user,
-                    &current_fd,
-                );
+                // 新的 fd 条目：仅当已有前一个 fd 时才保存
+                if current_fd.is_some() {
+                    flush_process(
+                        &mut results,
+                        &current_pid,
+                        &current_name,
+                        &current_user,
+                        &current_fd,
+                    );
+                }
                 current_fd = Some(value.to_string());
             }
             _ => {}
@@ -350,6 +352,18 @@ mod tests {
     fn parse_lsof_output_empty() {
         let result = parse_lsof_output("").unwrap();
         assert!(result.is_empty());
+    }
+
+    #[test]
+    fn parse_lsof_output_multiple_processes() {
+        // 多个不同进程各自有 fd，验证进程切换时不会产生虚假条目
+        let output = "p100\ncbash\nLroot\nfcwd\np200\ncvim\nLuser1\nf3r\n";
+        let result = parse_lsof_output(output).unwrap();
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].pid, 100);
+        assert_eq!(result[0].lock_type, LockType::WorkingDir);
+        assert_eq!(result[1].pid, 200);
+        assert_eq!(result[1].lock_type, LockType::FileHandle);
     }
 
     #[test]

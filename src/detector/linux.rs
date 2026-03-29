@@ -596,6 +596,7 @@ fn resolve_uid(uid: u32) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::detector::LockDetector;
 
     /// detect_deep 对不存在的路径应返回 PathNotFound 错误
     #[test]

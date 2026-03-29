@@ -1,5 +1,15 @@
 # Changelog / 更新日志
 
+## [Unreleased]
+
+### Fixed / 修复
+
+- **macOS lsof parser**: Fix `parse_lsof_output` generating spurious `FileHandle` entries — the first `f` field per process incorrectly flushed a `None` fd, producing duplicate records and breaking dedup / 修复 macOS lsof 解析器在每个进程的首个 fd 字段时错误 flush 产生虚假 `FileHandle` 条目的问题
+- **Linux test compilation**: Add missing `use crate::detector::LockDetector` import in `detector/linux.rs` test module — tests failed to compile on Linux due to trait methods not being in scope / 修复 Linux 检测器测试模块缺少 `LockDetector` trait 导入导致编译失败的问题
+- **CI: aarch64 cross-compile**: Fix ARM64 cross-compilation on Ubuntu 24.04 runners — adapt apt source configuration for deb822 format (`ubuntu.sources`) instead of legacy `sources.list`; add `security` pocket to ARM64 sources / 修复 Ubuntu 24.04 上 aarch64 交叉编译失败：适配 deb822 格式 apt 源配置，新增 security 源
+- **CI: Security audit permissions**: Add `checks: write` permission to security-audit job — `rustsec/audit-check@v2` requires this to create GitHub Check Runs / 修复安全审计 CI 权限不足（缺少 `checks: write`）
+- **Dependencies**: Update `unicode-segmentation` from yanked v1.13.1 to v1.13.2 / 更新被撤回的 `unicode-segmentation` v1.13.1 到 v1.13.2
+
 ## [1.0.0] - 2026-03-29
 
 首次公开发布 / Initial public release.
@@ -63,4 +73,5 @@
 - Dependency security audit (rustsec/audit-check) / 依赖安全审计
 - Custom app icon (SVG/PNG/ICO) embedded in Windows .exe / 自定义应用图标
 
+[Unreleased]: https://github.com/BBYYBB/who-locks/compare/v1.0.0...HEAD
 [1.0.0]: https://github.com/BBYYBB/who-locks/releases/tag/v1.0.0
