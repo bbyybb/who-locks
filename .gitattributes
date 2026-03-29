@@ -1,0 +1,19 @@
+# 跨平台换行符控制
+* text=auto
+
+# Rust 源码强制 LF
+*.rs text eol=lf
+*.toml text eol=lf
+
+# Shell 脚本强制 LF
+*.sh text eol=lf
+
+# Markdown 和文档强制 LF
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+
+# 二进制文件
+*.jpg binary
+*.png binary
+*.exe binary

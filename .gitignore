@@ -1,0 +1,26 @@
+/target
+/dist
+
+# Sysinternals 工具（运行时自动下载，不应提交到仓库）
+handle.exe
+handle64.exe
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 作者个人文档和工具（不公开）
+docs/CLEANUP_GUIDE.md
+docs/PROMOTION.md
+docs/RELEASE_GUIDE.md
+
+# 构建脚本（仅维护者本地使用，不公开）
+scripts/
+
+.fastRequest

@@ -1,0 +1,241 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+  pull_request:
+    branches: [main, master]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # 打赏文件完整性校验
+  attribution-check:
+    name: Attribution integrity check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify donation files integrity
+        run: |
+          echo "Checking donation file integrity..."
+          FAIL=0
+
+          check_hash() {
+            local file="$1"
+            local expected="$2"
+            if [ ! -f "$file" ]; then
+              echo "FAIL: $file is missing"
+              FAIL=1
+              return
+            fi
+            actual=$(sha256sum "$file" | cut -d' ' -f1)
+            if [ "$actual" != "$expected" ]; then
+              echo "FAIL: $file has been tampered (expected $expected, got $actual)"
+              FAIL=1
+            else
+              echo "OK: $file"
+            fi
+          }
+
+          check_hash "docs/wechat_pay.jpg" "686b9d5bba59d6831580984cb93804543f346d943f2baf4a94216fd13438f1e6"
+          check_hash "docs/alipay.jpg" "510155042b703d23f7eeabc04496097a7cc13772c5712c8d0716bab5962172dd"
+          check_hash "docs/bmc_qr.png" "bfd20ef305007c3dacf30dde49ce8f0fe4d7ac3ffcc86ac1f83bc1e75cccfcd6"
+
+          for marker in "buymeacoffee.com/bbyybb" "sponsors/bbyybb" "wechat_pay.jpg" "alipay.jpg" "bmc_qr.png"; do
+            if ! grep -q "$marker" README.md; then
+              echo "FAIL: README.md is missing marker: $marker"
+              FAIL=1
+            fi
+          done
+
+          if [ ! -f ".github/FUNDING.yml" ] || ! grep -q "bbyybb" ".github/FUNDING.yml"; then
+            echo "FAIL: .github/FUNDING.yml is missing or tampered"
+            FAIL=1
+          else
+            echo "OK: .github/FUNDING.yml"
+          fi
+
+          if [ $FAIL -ne 0 ]; then
+            echo ""
+            echo "========================================="
+            echo "Author attribution files have been modified."
+            echo "Please do not remove or modify donation/sponsor information."
+            echo "========================================="
+            exit 1
+          fi
+
+          echo "All attribution checks passed."
+
+  # 依赖安全审计
+  security-audit:
+    name: Security audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  # 跨平台构建（5 个目标）
+  build:
+    name: Build (${{ matrix.target }})
+    needs: attribution-check
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            archive: who-locks-windows-x86_64
+            ext: .zip
+            can_test: true
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            archive: who-locks-linux-x86_64
+            ext: .tar.gz
+            can_test: true
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            archive: who-locks-linux-aarch64
+            ext: .tar.gz
+            can_test: false  # 在 x86_64 runner 上交叉编译，跳过测试
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            archive: who-locks-macos-x86_64
+            ext: .tar.gz
+            can_test: false  # 在 ARM64 runner 上交叉编译，跳过测试
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            archive: who-locks-macos-aarch64
+            ext: .tar.gz
+            can_test: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install GUI deps (Linux x86_64)
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgl1-mesa-dev libx11-dev libxcursor-dev libxrandr-dev libxi-dev libxinerama-dev
+
+      - name: Install cross-compile deps (Linux aarch64)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo dpkg --add-architecture arm64
+          # 添加 ARM64 软件源
+          sudo sed -i 's/^deb /deb [arch=amd64] /' /etc/apt/sources.list
+          echo "deb [arch=arm64] http://ports.ubuntu.com/ $(lsb_release -cs) main restricted universe multiverse" | sudo tee /etc/apt/sources.list.d/arm64.list
+          echo "deb [arch=arm64] http://ports.ubuntu.com/ $(lsb_release -cs)-updates main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list.d/arm64.list
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          sudo apt-get install -y libgl1-mesa-dev:arm64 libx11-dev:arm64 libxcursor-dev:arm64 libxrandr-dev:arm64 libxi-dev:arm64 libxinerama-dev:arm64
+
+      - name: Set cross-compile env (Linux aarch64)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+          echo "PKG_CONFIG_SYSROOT_DIR=/usr/aarch64-linux-gnu" >> $GITHUB_ENV
+          echo "PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig" >> $GITHUB_ENV
+
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Test
+        if: matrix.can_test
+        run: cargo test --target ${{ matrix.target }}
+
+      - name: Format check
+        if: matrix.can_test
+        run: cargo fmt --check
+
+      - name: Clippy
+        run: cargo clippy --target ${{ matrix.target }} -- -D warnings
+
+      # 打包（带版本号）
+      - name: Package (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
+          ARCHIVE="${{ matrix.archive }}-v${VERSION}"
+          mkdir -p "${ARCHIVE}"
+          cp target/${{ matrix.target }}/release/who-locks "${ARCHIVE}/"
+          cp README.md README_EN.md LICENSE CHANGELOG.md "${ARCHIVE}/"
+          tar -czf "${ARCHIVE}.tar.gz" "${ARCHIVE}/"
+          echo "ASSET=${ARCHIVE}.tar.gz" >> $GITHUB_ENV
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path Cargo.toml -Pattern '^version' | Select-Object -First 1).Line -replace '.*"(.*)".*','$1'
+          $archive = "${{ matrix.archive }}-v${version}"
+          New-Item -ItemType Directory -Path $archive -Force
+          Copy-Item "target/${{ matrix.target }}/release/who-locks.exe" "$archive/"
+          Copy-Item README.md, README_EN.md, LICENSE, CHANGELOG.md "$archive/"
+          Compress-Archive -Path "$archive" -DestinationPath "${archive}.zip"
+          echo "ASSET=${archive}.zip" >> $env:GITHUB_ENV
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.archive }}
+          path: ${{ env.ASSET }}
+
+  # 自动发布 Release（tag 触发）
+  release:
+    name: Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: List artifacts
+        run: find artifacts/ -type f | sort
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+          generate_release_notes: true
+          body: |
+            ## 下载 / Download
+
+            | 平台 / Platform | 文件 / File |
+            |---|---|
+            | Windows (x86_64) | `who-locks-windows-x86_64-*.zip` |
+            | Linux (x86_64) | `who-locks-linux-x86_64-*.tar.gz` |
+            | Linux (aarch64) | `who-locks-linux-aarch64-*.tar.gz` |
+            | macOS (Intel) | `who-locks-macos-x86_64-*.tar.gz` |
+            | macOS (Apple Silicon) | `who-locks-macos-aarch64-*.tar.gz` |
+
+            解压后直接运行 `who-locks`（Linux/macOS）或 `who-locks.exe`（Windows），无需安装其他依赖。

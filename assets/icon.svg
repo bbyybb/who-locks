@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <!-- File/document body with folded corner -->
+  <path d="M40 20 L170 20 L216 66 L216 236 L40 236 Z" fill="#E8EDF2" stroke="#4A6785" stroke-width="6" stroke-linejoin="round"/>
+  <!-- Folded corner triangle -->
+  <path d="M170 20 L170 66 L216 66 Z" fill="#C5D0DC" stroke="#4A6785" stroke-width="4" stroke-linejoin="round"/>
+  <!-- Text lines on document -->
+  <rect x="68" y="95" width="100" height="8" rx="4" fill="#8FA4B8"/>
+  <rect x="68" y="115" width="120" height="8" rx="4" fill="#8FA4B8"/>
+  <rect x="68" y="135" width="80" height="8" rx="4" fill="#8FA4B8"/>
+  <!-- Lock body -->
+  <rect x="148" y="175" width="72" height="56" rx="8" fill="#E6A817" stroke="#C48A0A" stroke-width="4"/>
+  <!-- Lock shackle (U-shape arc) -->
+  <path d="M163 175 L163 155 A21 21 0 0 1 205 155 L205 175" fill="none" stroke="#C48A0A" stroke-width="8" stroke-linecap="round"/>
+  <!-- Keyhole -->
+  <circle cx="184" cy="200" r="7" fill="#8B6508"/>
+  <rect x="181" y="203" width="6" height="12" rx="2" fill="#8B6508"/>
+</svg>
