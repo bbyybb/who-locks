@@ -246,6 +246,7 @@ impl Scanner {
         }
 
         let mut files = Vec::new();
+        let mut collected_report_next = 500usize; // 每 500 个文件报告一次
 
         for entry in walker {
             if self.is_cancelled() {
@@ -263,6 +264,17 @@ impl Scanner {
                     }
 
                     files.push(e.into_path());
+
+                    // 收集阶段实时进度
+                    if files.len() >= collected_report_next {
+                        let label = if self.chinese {
+                            "正在收集文件列表"
+                        } else {
+                            "Collecting files"
+                        };
+                        self.report(&format!("{}... {}", label, files.len()));
+                        collected_report_next += 500;
+                    }
                 }
                 Err(e) => {
                     errors.push(ScanError {
@@ -293,8 +305,8 @@ impl Scanner {
         // 第三步：RM 批量检测文件（带进度）
         let path_refs: Vec<&Path> = files.iter().map(|p| p.as_path()).collect();
 
-        // 分批检测并报告进度
-        const PROGRESS_BATCH: usize = 500;
+        // 分批检测并报告进度（每 100 个文件一批，确保进度可见）
+        const PROGRESS_BATCH: usize = 100;
         let mut all_rm_results = Vec::new();
         let chunks: Vec<&[&Path]> = path_refs.chunks(PROGRESS_BATCH).collect();
 
@@ -302,7 +314,7 @@ impl Scanner {
             if self.is_cancelled() {
                 break;
             }
-            let scanned = ((i + 1) * PROGRESS_BATCH).min(total);
+            let scanned = (i * PROGRESS_BATCH).min(total);
             let label = if self.chinese {
                 "正在检测文件占用"
             } else {
@@ -835,5 +847,262 @@ mod tests {
         super::merge_deep_results(&mut locked, Vec::new());
         assert_eq!(locked.len(), 1);
         assert_eq!(locked[0].lockers.len(), 1);
+    }
+
+    // --- Scanner 主流程测试 ---
+
+    /// 可配置的 mock 检测器，用于测试 Scanner.scan() 主流程
+    struct MockDetector {
+        results: std::sync::Mutex<Vec<ProcessInfo>>,
+    }
+    impl MockDetector {
+        fn new(results: Vec<ProcessInfo>) -> Self {
+            Self {
+                results: std::sync::Mutex::new(results),
+            }
+        }
+        fn empty() -> Self {
+            Self::new(Vec::new())
+        }
+    }
+    impl LockDetector for MockDetector {
+        fn detect_file(&self, _path: &Path) -> Result<Vec<ProcessInfo>, Error> {
+            Ok(self.results.lock().unwrap().clone())
+        }
+        fn platform_name(&self) -> &'static str {
+            "mock"
+        }
+    }
+
+    #[test]
+    fn scanner_scan_single_file() {
+        // 测试单文件扫描模式（使用真实临时文件）
+        let tmp = std::env::temp_dir().join("who-locks-test-scan-file.txt");
+        std::fs::write(&tmp, "test").unwrap();
+
+        let scanner = Scanner::new(Box::new(MockDetector::empty()), None, false, vec![], false);
+        let result = scanner.scan(&tmp);
+
+        assert_eq!(result.total_files_scanned, 1);
+        assert!(
+            result.errors.is_empty()
+                || result.errors.iter().all(|e| e.reason.contains("Deep scan"))
+        );
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn scanner_scan_directory_collects_files() {
+        // 测试目录扫描模式（使用真实临时目录）
+        let tmp_dir = std::env::temp_dir().join("who-locks-test-scan-dir");
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+        std::fs::create_dir_all(tmp_dir.join("sub")).unwrap();
+        std::fs::write(tmp_dir.join("a.txt"), "a").unwrap();
+        std::fs::write(tmp_dir.join("b.txt"), "b").unwrap();
+        std::fs::write(tmp_dir.join("sub").join("c.txt"), "c").unwrap();
+
+        let scanner = Scanner::new(Box::new(MockDetector::empty()), None, false, vec![], false);
+        let result = scanner.scan(&tmp_dir);
+
+        assert!(
+            result.total_files_scanned >= 3,
+            "Should scan at least 3 files, got {}",
+            result.total_files_scanned
+        );
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[test]
+    fn scanner_scan_directory_with_exclude() {
+        // 测试排除模式在扫描中生效
+        let tmp_dir = std::env::temp_dir().join("who-locks-test-scan-exclude");
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+        std::fs::create_dir_all(tmp_dir.join("keep")).unwrap();
+        std::fs::create_dir_all(tmp_dir.join("skip")).unwrap();
+        std::fs::write(tmp_dir.join("keep").join("a.txt"), "a").unwrap();
+        std::fs::write(tmp_dir.join("skip").join("b.log"), "b").unwrap();
+        std::fs::write(tmp_dir.join("c.txt"), "c").unwrap();
+
+        let scanner = Scanner::new(
+            Box::new(MockDetector::empty()),
+            None,
+            false,
+            vec!["*.log".to_string()],
+            false,
+        );
+        let result = scanner.scan(&tmp_dir);
+
+        // b.log should be excluded, so total should be 2 (a.txt + c.txt)
+        assert_eq!(result.total_files_scanned, 2, "*.log should be excluded");
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[test]
+    fn scanner_scan_no_recursive() {
+        // 测试 max_depth=1 不递归子目录
+        let tmp_dir = std::env::temp_dir().join("who-locks-test-scan-norecurse");
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+        std::fs::create_dir_all(tmp_dir.join("sub")).unwrap();
+        std::fs::write(tmp_dir.join("top.txt"), "top").unwrap();
+        std::fs::write(tmp_dir.join("sub").join("deep.txt"), "deep").unwrap();
+
+        let scanner = Scanner::new(
+            Box::new(MockDetector::empty()),
+            Some(1), // max_depth = 1 = no recursion
+            false,
+            vec![],
+            false,
+        );
+        let result = scanner.scan(&tmp_dir);
+
+        assert_eq!(
+            result.total_files_scanned, 1,
+            "Should only scan top-level files"
+        );
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[test]
+    fn scanner_cancel_flag_stops_scan() {
+        // 测试取消标志在扫描过程中生效
+        let tmp_dir = std::env::temp_dir().join("who-locks-test-scan-cancel");
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+        std::fs::create_dir_all(&tmp_dir).unwrap();
+        std::fs::write(tmp_dir.join("a.txt"), "a").unwrap();
+
+        let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)); // pre-cancelled
+        let scanner = Scanner::new(Box::new(MockDetector::empty()), None, false, vec![], false)
+            .with_cancel(cancel);
+        let result = scanner.scan(&tmp_dir);
+
+        assert_eq!(
+            result.total_files_scanned, 0,
+            "Cancelled scan should scan 0 files"
+        );
+        assert!(result.locked_files.is_empty());
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[test]
+    fn scanner_progress_callback_called() {
+        // 测试进度回调被调用
+        let tmp = std::env::temp_dir().join("who-locks-test-scan-progress.txt");
+        std::fs::write(&tmp, "test").unwrap();
+
+        let called = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let called_clone = called.clone();
+        let scanner = Scanner::new(Box::new(MockDetector::empty()), None, false, vec![], false)
+            .with_progress(Box::new(move |_msg: &str| {
+                called_clone.store(true, std::sync::atomic::Ordering::Relaxed);
+            }));
+        let _ = scanner.scan(&tmp);
+
+        assert!(
+            called.load(std::sync::atomic::Ordering::Relaxed),
+            "Progress callback should be called"
+        );
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn scanner_msg_chinese() {
+        let scanner = Scanner::new(Box::new(DummyDetector), None, false, vec![], true);
+        assert!(scanner.msg("中文", "english").contains("中文"));
+    }
+
+    #[test]
+    fn scanner_msg_english() {
+        let scanner = Scanner::new(Box::new(DummyDetector), None, false, vec![], false);
+        assert_eq!(scanner.msg("中文", "english"), "english");
+    }
+
+    #[test]
+    fn scanner_is_cancelled_default_false() {
+        let scanner = Scanner::new(Box::new(DummyDetector), None, false, vec![], false);
+        assert!(
+            !scanner.is_cancelled(),
+            "Should not be cancelled by default"
+        );
+    }
+
+    #[test]
+    fn scanner_scan_nonexistent_path() {
+        // 扫描不存在的路径应返回 0 文件（不 panic）
+        let scanner = Scanner::new(Box::new(MockDetector::empty()), None, false, vec![], false);
+        let result = scanner.scan(Path::new("/nonexistent_who_locks_test_path_12345"));
+        // 不存在的路径不是目录也不是文件，scan 方法会尝试作为文件处理
+        // detect_file 返回空（MockDetector），不会 panic
+        assert!(result.locked_files.is_empty());
+    }
+
+    #[test]
+    fn scanner_scan_file_with_lock_results() {
+        // 测试检测器返回结果时 scan 正确聚合
+        let tmp = std::env::temp_dir().join("who-locks-test-scan-lock.txt");
+        std::fs::write(&tmp, "test").unwrap();
+
+        let mock = MockDetector::new(vec![ProcessInfo::new(
+            999,
+            "mock_proc".to_string(),
+            crate::model::LockType::FileHandle,
+            Some("mock cmd".to_string()),
+            Some("mock_user".to_string()),
+        )]);
+        let scanner = Scanner::new(Box::new(mock), None, false, vec![], false);
+        let result = scanner.scan(&tmp);
+
+        assert_eq!(result.total_files_scanned, 1);
+        // RM 检测应该返回 mock 结果
+        assert!(
+            result
+                .locked_files
+                .iter()
+                .any(|f| f.lockers.iter().any(|l| l.pid == 999)),
+            "Should contain mock lock result"
+        );
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    // --- glob_match 额外边界测试 ---
+
+    #[test]
+    fn glob_match_empty_pattern_matches_empty_text() {
+        assert!(super::glob_match("", ""));
+    }
+
+    #[test]
+    fn glob_match_empty_pattern_not_matches_text() {
+        assert!(!super::glob_match("", "abc"));
+    }
+
+    #[test]
+    fn glob_match_multiple_stars() {
+        assert!(super::glob_match("*.*", "file.txt"));
+        assert!(!super::glob_match("*.*", "noext"));
+    }
+
+    #[test]
+    fn glob_match_consecutive_stars() {
+        // 连续多个 * 应等价于单个 *
+        assert!(super::glob_match("**", "anything"));
+        assert!(super::glob_match("***", "anything"));
+    }
+
+    // --- is_excluded 额外测试 ---
+
+    #[test]
+    fn is_excluded_multiple_patterns_any_match() {
+        let scanner = make_scanner(vec!["*.log", "*.tmp", "cache"]);
+        assert!(scanner.is_excluded(Path::new("/project/error.log")));
+        assert!(scanner.is_excluded(Path::new("/project/data.tmp")));
+        assert!(scanner.is_excluded(Path::new("/project/cache/data")));
+        assert!(!scanner.is_excluded(Path::new("/project/src/main.rs")));
+    }
+
+    #[test]
+    fn is_excluded_root_level_file() {
+        let scanner = make_scanner(vec!["*.log"]);
+        // 即使文件在路径的根层级也应匹配
+        assert!(scanner.is_excluded(Path::new("/error.log")));
     }
 }

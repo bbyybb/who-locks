@@ -67,7 +67,14 @@ Download from [Releases](https://github.com/BBYYBB/who-locks/releases):
 
 **Windows**: Extract and double-click `who-locks.exe`.
 
-**macOS / Linux**: Extract, make executable, then run:
+**macOS**: Extract and double-click to run directly — no `chmod +x` needed. On first launch, macOS may block the app with an "unidentified developer" warning. Go to **System Settings → Privacy & Security**, find the blocked app, and click **"Open Anyway"**.
+
+```bash
+./who-locks            # Terminal: Launch GUI
+./who-locks /path/to   # Terminal: CLI mode scan
+```
+
+**Linux**: Extract, make executable, then run:
 ```bash
 chmod +x who-locks
 ./who-locks            # Launch GUI
@@ -95,7 +102,7 @@ On first run, the tool auto-downloads `handle64.exe` from Sysinternals Live, ver
 
 ### GUI Mode
 
-1. **Double-click** `who-locks.exe` (Windows) or `./who-locks` (macOS/Linux)
+1. **Double-click** `who-locks.exe` (Windows) or `who-locks` (macOS, allow in Privacy settings on first launch) or `./who-locks` (Linux)
 2. Click **"Files"** or **"Folder"** to select paths (multi-select supported)
 3. Configure scan options (subdirs, depth, exclusion patterns with `*`, `?` and `**` wildcards, follow symlinks)
 4. Click **"Scan"** and wait for results
@@ -194,6 +201,9 @@ src/
     ├── mod.rs           # ProcessKiller trait
     ├── windows.rs       # WM_CLOSE / TerminateProcess
     └── unix.rs          # SIGTERM/SIGKILL
+tests/
+└── cli_integration.rs   # CLI end-to-end integration tests
+build.rs                 # Build-time integrity checks + signature injection + Windows icon embedding
 ```
 
 ## Known Limitations

@@ -43,12 +43,13 @@ cargo build --release                      # Build / 编译
 ./target/release/who-locks /path/to/scan   # Run CLI mode / 命令行模式
 cargo fmt --check                          # Format check / 格式检查
 cargo clippy                               # Lint check / 代码检查
-cargo test                                 # Run unit tests / 运行单元测试
+cargo test                                 # Run all tests (unit + integration) / 运行全部测试（单元 + 集成）
 ```
 
 ### Testing Notes / 测试说明
 
-- `cargo test` runs all unit tests on the current platform. Tests for other platforms are automatically skipped via `#[cfg]` / `cargo test` 运行当前平台的所有单元测试，其他平台的测试通过 `#[cfg]` 自动跳过
+- `cargo test` runs both **unit tests** (in `src/`) and **integration tests** (in `tests/`) on the current platform. Tests for other platforms are automatically skipped via `#[cfg]` / `cargo test` 运行当前平台的全部单元测试（src/）和集成测试（tests/），其他平台的测试通过 `#[cfg]` 自动跳过
+- Integration tests in `tests/cli_integration.rs` invoke the compiled binary via CLI, testing end-to-end behavior / `tests/cli_integration.rs` 中的集成测试通过 CLI 调用编译后的二进制，测试端到端行为
 - Some tests (e.g., resource integrity checks) require a clean build (`cargo clean && cargo test`) / 部分测试（如资源完整性校验）需要干净构建才能通过
 - Process killer tests use non-existent PIDs and don't affect your system / 进程终止器测试使用不存在的 PID，不会影响系统
 - Windows-specific tests (case-insensitive exclude, handle.exe parsing) only run on Windows / Windows 特定测试仅在 Windows 上运行
@@ -66,15 +67,19 @@ cargo test                                 # Run unit tests / 运行单元测试
 
 ```
 assets/     -- App icons (SVG/PNG/ICO) / 应用图标
-main.rs     -- Entry point (GUI or CLI) / 程序入口
-cli.rs      -- CLI command-line mode / 命令行模式
-error.rs    -- Error types / 错误类型
-model.rs    -- Data models / 数据模型
-scan.rs     -- Scan coordinator / 扫描协调器
-res.rs      -- Resource integrity / 资源完整性校验
-detector/   -- Platform detectors (trait LockDetector) / 平台检测器
-killer/     -- Process killers (trait ProcessKiller) / 进程终止器
-gui/        -- GUI layer (egui/eframe, i18n, export) / 图形界面层
+src/
+  main.rs   -- Entry point (GUI or CLI) / 程序入口
+  cli.rs    -- CLI command-line mode / 命令行模式
+  error.rs  -- Error types / 错误类型
+  model.rs  -- Data models / 数据模型
+  scan.rs   -- Scan coordinator / 扫描协调器
+  res.rs    -- Resource integrity / 资源完整性校验
+  detector/ -- Platform detectors (trait LockDetector) / 平台检测器
+  killer/   -- Process killers (trait ProcessKiller) / 进程终止器
+  gui/      -- GUI layer (egui/eframe, i18n, export) / 图形界面层
+tests/      -- CLI integration tests / CLI 集成测试
+build.rs    -- Build-time integrity checks + signature injection / 编译时完整性校验 + 签名注入
+scripts/    -- Build, release, and hash update helpers / 构建、发布和哈希更新辅助脚本
 ```
 
 To add a new platform / 添加新平台支持:

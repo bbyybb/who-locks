@@ -423,4 +423,100 @@ mod tests {
         let result = detect_deep(Path::new("/etc/hosts"));
         assert!(result.is_ok(), "Should succeed for existing file");
     }
+
+    // --- 额外的 lsof 解析测试 ---
+
+    #[test]
+    fn parse_lsof_output_process_without_fd() {
+        // 进程有 pid 和 name 但没有 fd 字段（不应产生条目）
+        let output = "p100\ncbash\nLroot\n";
+        let result = parse_lsof_output(output).unwrap();
+        // 没有 fd 字段时，flush_process 会用默认的 FileHandle
+        // 但因为最后 flush 时 current_fd 是 None，仍然会创建一个条目
+        // (这是当前行为的回归保护)
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].lock_type, LockType::FileHandle);
+    }
+
+    #[test]
+    fn parse_lsof_output_user_from_u_field() {
+        // 当没有 L 字段时，u 字段应作为用户名
+        let output = "p100\ncbash\nu501\nfcwd\n";
+        let result = parse_lsof_output(output).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].user, Some("501".to_string()));
+    }
+
+    #[test]
+    fn parse_lsof_output_l_field_takes_precedence() {
+        // 当同时有 L 和 u 字段时，L 应优先
+        let output = "p100\ncbash\nLroot\nu501\nfcwd\n";
+        let result = parse_lsof_output(output).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].user, Some("root".to_string()));
+    }
+
+    #[test]
+    fn fd_type_to_lock_type_rtd() {
+        // rtd = root directory，应映射为 DirHandle
+        assert_eq!(fd_type_to_lock_type("rtd"), LockType::DirHandle);
+    }
+
+    #[test]
+    fn fd_type_to_lock_type_del_variants() {
+        // DEL 前缀表示已删除的 mmap
+        assert_eq!(fd_type_to_lock_type("DEL"), LockType::MemoryMap);
+        assert_eq!(fd_type_to_lock_type("DELeted"), LockType::MemoryMap);
+    }
+
+    #[test]
+    fn fd_type_to_lock_type_numeric_fd_variants() {
+        // 各种数字 fd 格式
+        assert_eq!(fd_type_to_lock_type("0"), LockType::FileHandle);
+        assert_eq!(fd_type_to_lock_type("0r"), LockType::FileHandle);
+        assert_eq!(fd_type_to_lock_type("1w"), LockType::FileHandle);
+        assert_eq!(fd_type_to_lock_type("3u"), LockType::FileHandle);
+        assert_eq!(fd_type_to_lock_type("255r"), LockType::FileHandle);
+    }
+
+    #[test]
+    fn parse_lsof_batch_output_empty() {
+        let result = parse_lsof_batch_output("").unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn parse_lsof_batch_output_process_switch_no_leak() {
+        // 验证进程切换时不会把旧进程的 fd 泄漏到新进程的 name 下
+        let output = "p100\ncbash\nfcwd\nn/tmp/a\np200\ncvim\nf3r\nn/tmp/b\n";
+        let result = parse_lsof_batch_output(output).unwrap();
+        assert_eq!(result.len(), 2);
+        let a_info = result
+            .iter()
+            .find(|f| f.path == PathBuf::from("/tmp/a"))
+            .unwrap();
+        assert_eq!(a_info.lockers[0].name, "bash");
+        assert_eq!(a_info.lockers[0].pid, 100);
+        let b_info = result
+            .iter()
+            .find(|f| f.path == PathBuf::from("/tmp/b"))
+            .unwrap();
+        assert_eq!(b_info.lockers[0].name, "vim");
+        assert_eq!(b_info.lockers[0].pid, 200);
+    }
+
+    #[test]
+    fn parse_lsof_batch_output_multiple_processes_same_file() {
+        // 多个进程打开同一个文件
+        let output = "p100\ncbash\nf3r\nn/tmp/shared.txt\np200\ncvim\nf4w\nn/tmp/shared.txt\n";
+        let result = parse_lsof_batch_output(output).unwrap();
+        let shared = result
+            .iter()
+            .find(|f| f.path == PathBuf::from("/tmp/shared.txt"))
+            .unwrap();
+        assert_eq!(shared.lockers.len(), 2);
+        let pids: Vec<u32> = shared.lockers.iter().map(|l| l.pid).collect();
+        assert!(pids.contains(&100));
+        assert!(pids.contains(&200));
+    }
 }

@@ -331,7 +331,8 @@ pub fn render_results(ui: &mut egui::Ui, state: &mut GuiState, lang: Lang) {
                     row.col(|ui| {
                         let text = egui::RichText::new(&r.file_path);
                         let text = if r.blocking { text } else { text.color(dim) };
-                        ui.label(text).on_hover_text(&r.file_path);
+                        // clip(true) 裁剪时 egui 自动显示 tooltip，无需手动添加
+                        ui.label(text);
                     });
                     row.col(|ui| {
                         let c = if r.blocking {
@@ -374,8 +375,8 @@ pub fn render_results(ui: &mut egui::Ui, state: &mut GuiState, lang: Lang) {
                             r.cmdline.clone()
                         };
                         let text = egui::RichText::new(&cmd);
-                        ui.label(if r.blocking { text } else { text.color(dim) })
-                            .on_hover_text(&cmd);
+                        // clip(true) 裁剪时 egui 自动显示 tooltip，无需手动添加
+                        ui.label(if r.blocking { text } else { text.color(dim) });
                     });
                     row.col(|ui| {
                         let s = if r.user.is_empty() {
@@ -384,8 +385,8 @@ pub fn render_results(ui: &mut egui::Ui, state: &mut GuiState, lang: Lang) {
                             r.user.clone()
                         };
                         let text = egui::RichText::new(&s);
-                        ui.label(if r.blocking { text } else { text.color(dim) })
-                            .on_hover_text(&s);
+                        // clip(true) 裁剪时 egui 自动显示 tooltip，无需手动添加
+                        ui.label(if r.blocking { text } else { text.color(dim) });
                     });
                 }
             });

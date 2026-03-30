@@ -32,3 +32,23 @@ pub mod windows;
 
 #[cfg(unix)]
 pub mod unix;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn create_killer_returns_valid_instance() {
+        let killer = create_killer();
+        // 对不存在的 PID 应返回错误而非 panic
+        let result = killer.kill_force(u32::MAX);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn create_killer_graceful_invalid_pid() {
+        let killer = create_killer();
+        let result = killer.kill_graceful(u32::MAX);
+        assert!(result.is_err());
+    }
+}

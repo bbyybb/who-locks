@@ -67,7 +67,14 @@
 
 **Windows**: 解压后双击 `who-locks.exe` 即可打开图形界面。
 
-**macOS / Linux**: 解压后赋予执行权限，双击或终端运行：
+**macOS**: 解压后直接双击即可运行，无需 `chmod +x`。首次运行时系统可能会弹出 "无法验证开发者" 的提示，此时前往 **系统设置 → 隐私与安全性**，找到被拦截的应用，点击 **"仍要打开"** 即可。
+
+```bash
+./who-locks            # 终端运行：启动图形界面
+./who-locks /path/to   # 终端运行：命令行模式扫描
+```
+
+**Linux**: 解压后赋予执行权限，双击或终端运行：
 ```bash
 chmod +x who-locks
 ./who-locks            # 启动图形界面
@@ -95,7 +102,7 @@ cargo build --release
 
 ### GUI 图形界面
 
-1. **双击运行** `who-locks.exe`（Windows）或 `./who-locks`（macOS/Linux），打开图形界面
+1. **双击运行** `who-locks.exe`（Windows）或 `who-locks`（macOS，首次需在隐私设置中允许）或 `./who-locks`（Linux），打开图形界面
 2. 点击 **「选择文件」** 或 **「选择目录」** 按钮，选择要检测的路径（支持多选）
 3. 设置扫描选项（子目录、深度限制、排除模式支持 `*`、`?` 和 `**` 通配符、跟随符号链接）
 4. 点击 **「开始扫描」**，等待扫描完成
@@ -197,6 +204,9 @@ src/
     ├── mod.rs           # ProcessKiller trait
     ├── windows.rs       # WM_CLOSE / TerminateProcess
     └── unix.rs          # SIGTERM/SIGKILL
+tests/
+└── cli_integration.rs   # CLI 端到端集成测试
+build.rs                 # 编译时完整性校验 + 签名注入 + Windows 图标嵌入
 ```
 
 ## 已知限制

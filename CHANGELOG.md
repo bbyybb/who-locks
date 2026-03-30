@@ -2,7 +2,34 @@
 
 ## [Unreleased]
 
+### Added / 新增
+
+- **Integration tests**: Add 8 CLI integration tests in `tests/cli_integration.rs` — end-to-end testing via compiled binary covering help output, error handling, JSON/text format, recursive/depth/exclude/multi-path options / 新增 8 个 CLI 集成测试，通过编译后的二进制进行端到端测试，覆盖帮助输出、错误处理、JSON/文本格式、递归/深度/排除/多路径选项
+- **Unit tests**: Add tests for `error.rs` (6 tests: Display format, From conversion, Debug trait) and `killer/mod.rs` (2 tests: factory function validation), bringing total from 183 to 199 / 新增 error.rs（6 个）和 killer/mod.rs（2 个）单元测试，总数从 183 增至 199
+- **`.editorconfig`**: Add editor configuration for consistent coding style across contributors (UTF-8, LF, indent settings per file type) / 新增编辑器配置文件，统一贡献者的编码风格
+- **`.github/ISSUE_TEMPLATE/config.yml`**: Disable blank issues; add contact links for Discussions and Security Advisories / 禁用空白 issue，添加讨论区和安全公告链接
+
+### Changed / 变更
+
+- **CI: Release gate**: Release job now depends on both `build` and `security-audit` (previously only `build`), preventing releases with known dependency vulnerabilities / Release job 现在同时依赖 build 和 security-audit，防止有已知漏洞的版本被发布
+
 ### Fixed / 修复
+
+- **`scripts/generate-screenshots.sh`**: Add `set -e` for consistent error handling with other project scripts / 添加 `set -e`，与其他脚本保持一致的错误处理
+- **`scripts/update-hashes.sh`**: Add python3 availability pre-check at script start with clear warning message / 脚本开头预检测 python3 可用性并给出明确提示
+- **`docs/RELEASE_GUIDE.md`**: Mark First Release Checklist as completed (v1.0.0 was released on 2026-03-29) / 将首次发布检查清单标记为已完成
+
+## [1.1.0] - 2026-03-30
+
+### Added / 新增
+
+- **Unit tests**: Expand test suite from 87 to 183 tests (+96), covering CLI argument parsing, Scanner main flow (scan/cancel/exclude/depth), model serialization & all platform non-blocking processes, GUI state (sort/filter/apply_result), export edge cases (empty data/JSON structure), i18n translation completeness, detector default batch implementation, and platform-aware blocking tests / 单元测试从 87 扩展到 183 个（+96），覆盖 CLI 参数解析、Scanner 主流程、模型序列化及全平台非阻塞进程判断、GUI 状态、导出边界、国际化翻译完整性、检测器默认批量实现、平台感知阻塞测试
+
+### Fixed / 修复
+
+- **macOS/Linux blocking detection**: On Unix systems, all lock types except `FileLock` (flock/fcntl) are now correctly marked as non-blocking — Unix allows unlink/rename/move even while files are open; only advisory file locks may actually block operations. Previously, `FileHandle`, `WorkingDir`, `Executable`, and `MemoryMap` were incorrectly shown as blocking on macOS/Linux / 修复 macOS/Linux 上的阻塞检测：Unix 系统下除 `FileLock`（flock/fcntl）外，所有锁类型现在正确标记为非阻塞。此前 `FileHandle`、`WorkingDir`、`Executable`、`MemoryMap` 在 macOS/Linux 上被错误地显示为阻塞
+- **Scan progress**: Add real-time file count during directory collection phase; reduce batch size from 500 to 100 for smoother progress updates — previously Windows showed no visible progress for small directories / 扫描进度优化：收集文件阶段实时显示文件数量；批量检测批次从 500 缩小到 100 使进度更平滑——此前 Windows 上小目录扫描看不到进度
+- **Duplicate tooltips**: Remove redundant manual `on_hover_text()` calls on table cells — `clip(true)` columns already auto-show tooltips when text is truncated, causing double tooltips on hover / 修复鼠标悬浮时重复显示 tooltip：移除手动 `on_hover_text()` 调用，列裁剪时 egui 已自动显示 tooltip
 
 - **macOS lsof parser**: Fix `parse_lsof_output` generating spurious `FileHandle` entries — the first `f` field per process incorrectly flushed a `None` fd, producing duplicate records and breaking dedup / 修复 macOS lsof 解析器在每个进程的首个 fd 字段时错误 flush 产生虚假 `FileHandle` 条目的问题
 - **Linux test compilation**: Add missing `use crate::detector::LockDetector` import in `detector/linux.rs` test module — tests failed to compile on Linux due to trait methods not being in scope / 修复 Linux 检测器测试模块缺少 `LockDetector` trait 导入导致编译失败的问题
@@ -67,11 +94,12 @@
 - **Encoding auto-detection**: Pipe output decoded via UTF-8 → GBK → system ANSI → OEM fallback chain / 管道输出编码自动检测（UTF-8 → GBK → 系统 ANSI → OEM）
 
 #### Quality / 质量
-- 87+ unit tests covering scan exclusion, `**` glob matching, deep scan merge, handle.exe parsing, lsof parsing, path utilities, process killer, resource integrity, SHA-256, i18n, export / 87+ 单元测试
+- 183+ unit tests covering CLI parsing, scan flow, exclusion patterns, `**` glob matching, deep scan merge, handle.exe parsing, lsof parsing, path utilities, process killer, model serialization, GUI state management, export formats, resource integrity, SHA-256, i18n completeness, detector batch, platform-aware blocking / 183+ 单元测试
 - `cargo clippy -D warnings` strict mode + `cargo fmt` CI checks / clippy 严格模式 + 格式检查
 - 5-platform CI: Windows x64, Linux x64/ARM64, macOS Intel/Apple Silicon / 5 平台自动构建
 - Dependency security audit (rustsec/audit-check) / 依赖安全审计
 - Custom app icon (SVG/PNG/ICO) embedded in Windows .exe / 自定义应用图标
 
-[Unreleased]: https://github.com/BBYYBB/who-locks/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/BBYYBB/who-locks/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/BBYYBB/who-locks/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/BBYYBB/who-locks/releases/tag/v1.0.0

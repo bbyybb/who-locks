@@ -1,6 +1,6 @@
 [package]
 name = "who-locks"
-version = "1.0.0"
+version = "1.1.0"
 edition = "2021"
 rust-version = "1.74"
 description = "Cross-platform file lock detector with GUI - find out which processes are locking your files"

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions / 使用问题
+    url: https://github.com/BBYYBB/who-locks/discussions
+    about: Ask questions or discuss ideas here / 在讨论区提问或交流想法
+  - name: Security Vulnerability / 安全漏洞
+    url: https://github.com/BBYYBB/who-locks/security/advisories/new
+    about: Report security vulnerabilities privately / 私密报告安全漏洞

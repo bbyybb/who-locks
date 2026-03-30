@@ -77,9 +77,24 @@ impl ProcessInfo {
         // handle.exe 检测到的目录句柄是 FILE_LIST_DIRECTORY 共享访问，
         // 不会阻止目录内文件的移动/删除/重命名操作。
         // 进程打开文件时自动获取的父目录句柄也属于此类。
-        // 注意：WorkingDir（进程工作目录）是单独的类型，会阻止删除该目录，不受此规则影响。
+        // 注意：在 Windows 上，WorkingDir（进程工作目录）会阻止删除该目录，不受此规则影响。
         if self.lock_type == LockType::DirHandle {
             return false;
+        }
+
+        // ── macOS / Linux：Unix 文件系统语义 ──
+        // Unix 系统下，文件/目录被进程打开时 OS 不阻止 unlink/rename/move：
+        //   - FileHandle: open() 不阻止删除，删除后 inode 保留直到 fd 关闭
+        //   - WorkingDir: 进程 cwd 不阻止父目录删除
+        //   - Executable: 运行中的二进制可以被删除/替换
+        //   - MemoryMap: mmap 映射的文件可以被删除
+        // 只有 FileLock（flock/fcntl）才是真正的协作锁，可能阻止操作。
+        // 因此在 macOS/Linux 上，除 FileLock 外全部标记为非阻塞。
+        #[cfg(not(target_os = "windows"))]
+        {
+            if self.lock_type != LockType::FileLock {
+                return false;
+            }
         }
 
         let name_lower = self.name.to_lowercase();
@@ -255,8 +270,20 @@ mod tests {
             Some("notepad.exe C:\\test.txt".to_string()),
             Some("user".to_string()),
         );
-        assert!(proc.is_blocking(), "Normal process should be blocking");
-        assert!(proc.blocking, "blocking field should be auto-set to true");
+        // Windows: FileHandle 阻塞；macOS/Linux: FileHandle 不阻塞（Unix 语义）
+        #[cfg(target_os = "windows")]
+        {
+            assert!(
+                proc.is_blocking(),
+                "Normal process should be blocking on Windows"
+            );
+            assert!(proc.blocking, "blocking field should be auto-set to true");
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            assert!(!proc.is_blocking(), "Unix: FileHandle is non-blocking");
+            assert!(!proc.blocking);
+        }
     }
 
     #[test]
@@ -326,7 +353,11 @@ mod tests {
             None,
             None,
         );
+        // Windows: FileHandle 阻塞；macOS/Linux: FileHandle 不阻塞
+        #[cfg(target_os = "windows")]
         assert!(blocking_proc.blocking);
+        #[cfg(not(target_os = "windows"))]
+        assert!(!blocking_proc.blocking);
 
         let non_blocking_proc = ProcessInfo::new(
             2,
@@ -344,5 +375,262 @@ mod tests {
         let non_blocking_linux =
             ProcessInfo::new(4, "nautilus".to_string(), LockType::DirHandle, None, None);
         assert!(!non_blocking_linux.blocking);
+    }
+
+    // --- 额外的 LockType 测试 ---
+
+    #[test]
+    fn lock_type_other_display() {
+        assert_eq!(LockType::Other("Custom".to_string()).to_string(), "Custom");
+        assert_eq!(LockType::Other("WMI".to_string()).to_string(), "WMI");
+        assert_eq!(LockType::Other("".to_string()).to_string(), "");
+    }
+
+    #[test]
+    fn lock_type_equality() {
+        assert_eq!(LockType::FileHandle, LockType::FileHandle);
+        assert_ne!(LockType::FileHandle, LockType::MemoryMap);
+        assert_eq!(
+            LockType::Other("WMI".to_string()),
+            LockType::Other("WMI".to_string())
+        );
+        assert_ne!(
+            LockType::Other("A".to_string()),
+            LockType::Other("B".to_string())
+        );
+    }
+
+    #[test]
+    fn lock_type_clone() {
+        let lt = LockType::FileHandle;
+        let cloned = lt.clone();
+        assert_eq!(lt, cloned);
+
+        let lt2 = LockType::Other("test".to_string());
+        let cloned2 = lt2.clone();
+        assert_eq!(lt2, cloned2);
+    }
+
+    // --- is_blocking 详细覆盖 ---
+
+    #[test]
+    fn is_blocking_working_dir_platform_aware() {
+        let proc = ProcessInfo::new(
+            100,
+            "code.exe".to_string(),
+            LockType::WorkingDir,
+            None,
+            None,
+        );
+        // Windows: WorkingDir 会阻止目录删除
+        // macOS/Linux: WorkingDir 不阻止目录删除（Unix 语义）
+        #[cfg(target_os = "windows")]
+        assert!(
+            proc.is_blocking(),
+            "WorkingDir should be blocking on Windows"
+        );
+        #[cfg(not(target_os = "windows"))]
+        assert!(!proc.is_blocking(), "Unix: WorkingDir is non-blocking");
+    }
+
+    #[test]
+    fn is_blocking_self_process() {
+        // 自身进程不应阻塞
+        let self_pid = std::process::id();
+        let proc = ProcessInfo::new(
+            self_pid,
+            "test_process".to_string(),
+            LockType::FileHandle,
+            None,
+            None,
+        );
+        assert!(!proc.is_blocking(), "Self process should not be blocking");
+    }
+
+    #[test]
+    fn is_blocking_macos_finder_case_insensitive() {
+        // macOS Finder（大小写不敏感）
+        for name in ["Finder", "finder", "FINDER"] {
+            let proc = ProcessInfo::new(100, name.to_string(), LockType::FileHandle, None, None);
+            assert!(!proc.is_blocking(), "{} should not be blocking", name);
+        }
+    }
+
+    #[test]
+    fn is_blocking_macos_spotlight_processes() {
+        // macOS Spotlight 相关进程
+        for name in [
+            "mds",
+            "mds_stores",
+            "mdworker",
+            "mdworker_shared",
+            "fseventsd",
+        ] {
+            let proc = ProcessInfo::new(100, name.to_string(), LockType::FileHandle, None, None);
+            assert!(!proc.is_blocking(), "{} should not be blocking", name);
+        }
+    }
+
+    #[test]
+    fn is_blocking_linux_file_managers() {
+        // Linux 桌面文件管理器
+        for name in [
+            "tracker-miner-f",
+            "tracker-miner-fs-3",
+            "baloo_file",
+            "nautilus",
+            "dolphin",
+            "thunar",
+        ] {
+            let proc = ProcessInfo::new(100, name.to_string(), LockType::FileHandle, None, None);
+            assert!(!proc.is_blocking(), "{} should not be blocking", name);
+        }
+    }
+
+    #[test]
+    fn is_blocking_windows_defender_variants() {
+        for name in ["MsMpEng.exe", "msmpeng.exe", "MpCmdRun.exe", "mpcmdrun.exe"] {
+            let proc = ProcessInfo::new(100, name.to_string(), LockType::FileHandle, None, None);
+            assert!(!proc.is_blocking(), "{} should not be blocking", name);
+        }
+    }
+
+    #[test]
+    fn is_blocking_prevhost() {
+        let proc = ProcessInfo::new(
+            100,
+            "prevhost.exe".to_string(),
+            LockType::FileHandle,
+            None,
+            None,
+        );
+        assert!(!proc.is_blocking(), "prevhost should not be blocking");
+    }
+
+    // --- ProcessInfo 序列化测试 ---
+
+    #[test]
+    fn process_info_serializes_to_json() {
+        let proc = ProcessInfo::new(
+            1234,
+            "test.exe".to_string(),
+            LockType::FileHandle,
+            Some("test.exe arg".to_string()),
+            Some("user".to_string()),
+        );
+        let json = serde_json::to_value(&proc).unwrap();
+        assert_eq!(json["pid"], 1234);
+        assert_eq!(json["name"], "test.exe");
+        assert_eq!(json["cmdline"], "test.exe arg");
+        assert_eq!(json["user"], "user");
+        // Windows: FileHandle 阻塞；macOS/Linux: 不阻塞
+        #[cfg(target_os = "windows")]
+        assert_eq!(json["blocking"], true);
+        #[cfg(not(target_os = "windows"))]
+        assert_eq!(json["blocking"], false);
+    }
+
+    #[test]
+    fn process_info_serializes_optional_fields() {
+        let proc = ProcessInfo::new(1, "test".to_string(), LockType::MemoryMap, None, None);
+        let json = serde_json::to_value(&proc).unwrap();
+        assert!(json["cmdline"].is_null());
+        assert!(json["user"].is_null());
+    }
+
+    #[test]
+    fn file_lock_info_serializes() {
+        let info = FileLockInfo {
+            path: std::path::PathBuf::from("/test/file.txt"),
+            lockers: vec![ProcessInfo::new(
+                100,
+                "proc".to_string(),
+                LockType::FileHandle,
+                None,
+                None,
+            )],
+        };
+        let json = serde_json::to_value(&info).unwrap();
+        assert_eq!(json["path"], "/test/file.txt");
+        assert!(json["lockers"].is_array());
+        assert_eq!(json["lockers"][0]["pid"], 100);
+    }
+
+    #[test]
+    fn lock_type_serializes() {
+        let json = serde_json::to_value(&LockType::FileHandle).unwrap();
+        assert_eq!(json, "FileHandle");
+
+        let json = serde_json::to_value(&LockType::Other("WMI".to_string())).unwrap();
+        assert!(json.is_object() || json.is_string());
+    }
+
+    // --- ScanResult 和 ScanError ---
+
+    #[test]
+    fn scan_error_display() {
+        let err = ScanError {
+            path: std::path::PathBuf::from("/test"),
+            reason: "permission denied".to_string(),
+        };
+        assert_eq!(err.path.display().to_string(), "/test");
+        assert_eq!(err.reason, "permission denied");
+    }
+
+    #[test]
+    fn process_info_display_with_lock_type() {
+        let proc = ProcessInfo::new(42, "vim".to_string(), LockType::WorkingDir, None, None);
+        assert_eq!(proc.to_string(), "[42] vim (Working Dir)");
+    }
+
+    // --- Unix 平台特有测试 ---
+
+    /// macOS/Linux 上，只有 FileLock 是真正阻塞的
+    #[test]
+    #[cfg(not(target_os = "windows"))]
+    fn unix_only_file_lock_is_blocking() {
+        let flock = ProcessInfo::new(100, "proc".to_string(), LockType::FileLock, None, None);
+        assert!(flock.is_blocking(), "Unix: FileLock should be blocking");
+    }
+
+    /// macOS/Linux 上，所有其他锁类型都不阻塞
+    #[test]
+    #[cfg(not(target_os = "windows"))]
+    fn unix_non_file_lock_types_are_non_blocking() {
+        let types = [
+            LockType::FileHandle,
+            LockType::WorkingDir,
+            LockType::Executable,
+            LockType::MemoryMap,
+            LockType::DirHandle,
+        ];
+        for lt in types {
+            let proc = ProcessInfo::new(100, "any_process".to_string(), lt.clone(), None, None);
+            assert!(!proc.is_blocking(), "Unix: {:?} should be non-blocking", lt);
+        }
+    }
+
+    /// Windows 上，FileLock 同样是阻塞的
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn windows_file_lock_is_blocking() {
+        let flock = ProcessInfo::new(100, "proc".to_string(), LockType::FileLock, None, None);
+        assert!(flock.is_blocking(), "Windows: FileLock should be blocking");
+    }
+
+    /// Windows 上，普通进程的 FileHandle / WorkingDir / Executable / MemoryMap 是阻塞的
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn windows_file_handle_is_blocking() {
+        let types = [
+            LockType::FileHandle,
+            LockType::WorkingDir,
+            LockType::Executable,
+            LockType::MemoryMap,
+        ];
+        for lt in types {
+            let proc = ProcessInfo::new(100, "notepad.exe".to_string(), lt.clone(), None, None);
+            assert!(proc.is_blocking(), "Windows: {:?} should be blocking", lt);
+        }
     }
 }

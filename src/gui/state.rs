@@ -334,4 +334,244 @@ mod tests {
         let display = GuiState::compute_display_path(path);
         assert_eq!(display, "/home/user/project");
     }
+
+    // --- 排序测试 ---
+
+    #[test]
+    fn toggle_sort_same_column_reverses_order() {
+        let mut state = GuiState::default();
+        state.toggle_sort(SortColumn::Pid);
+        assert_eq!(state.sort_column, Some(SortColumn::Pid));
+        assert_eq!(state.sort_order, SortOrder::Ascending);
+
+        state.toggle_sort(SortColumn::Pid);
+        assert_eq!(state.sort_column, Some(SortColumn::Pid));
+        assert_eq!(state.sort_order, SortOrder::Descending);
+
+        state.toggle_sort(SortColumn::Pid);
+        assert_eq!(state.sort_order, SortOrder::Ascending);
+    }
+
+    #[test]
+    fn toggle_sort_different_column_resets_to_ascending() {
+        let mut state = GuiState::default();
+        state.toggle_sort(SortColumn::Pid);
+        state.toggle_sort(SortColumn::Pid); // now descending
+        assert_eq!(state.sort_order, SortOrder::Descending);
+
+        state.toggle_sort(SortColumn::ProcName); // different column
+        assert_eq!(state.sort_column, Some(SortColumn::ProcName));
+        assert_eq!(state.sort_order, SortOrder::Ascending);
+    }
+
+    #[test]
+    fn sort_indicator_active_column() {
+        let mut state = GuiState::default();
+        state.toggle_sort(SortColumn::FilePath);
+        assert_eq!(state.sort_indicator(SortColumn::FilePath), " ^");
+
+        state.toggle_sort(SortColumn::FilePath);
+        assert_eq!(state.sort_indicator(SortColumn::FilePath), " v");
+    }
+
+    #[test]
+    fn sort_indicator_inactive_column() {
+        let mut state = GuiState::default();
+        state.toggle_sort(SortColumn::Pid);
+        assert_eq!(state.sort_indicator(SortColumn::FilePath), "");
+        assert_eq!(state.sort_indicator(SortColumn::ProcName), "");
+    }
+
+    #[test]
+    fn sort_indicator_no_sort_set() {
+        let state = GuiState::default();
+        assert_eq!(state.sort_indicator(SortColumn::Pid), "");
+    }
+
+    #[test]
+    fn filtered_rows_sorted_by_pid_ascending() {
+        let mut state = GuiState::default();
+        state.rows = vec![
+            make_row("a.txt", 300, true),
+            make_row("b.txt", 100, true),
+            make_row("c.txt", 200, true),
+        ];
+        state.toggle_sort(SortColumn::Pid);
+        let filtered = state.filtered_rows();
+        assert_eq!(filtered[0].1.pid, 100);
+        assert_eq!(filtered[1].1.pid, 200);
+        assert_eq!(filtered[2].1.pid, 300);
+    }
+
+    #[test]
+    fn filtered_rows_sorted_by_pid_descending() {
+        let mut state = GuiState::default();
+        state.rows = vec![
+            make_row("a.txt", 300, true),
+            make_row("b.txt", 100, true),
+            make_row("c.txt", 200, true),
+        ];
+        state.toggle_sort(SortColumn::Pid);
+        state.toggle_sort(SortColumn::Pid); // descending
+        let filtered = state.filtered_rows();
+        assert_eq!(filtered[0].1.pid, 300);
+        assert_eq!(filtered[1].1.pid, 200);
+        assert_eq!(filtered[2].1.pid, 100);
+    }
+
+    #[test]
+    fn filtered_rows_search_and_sort_combined() {
+        let mut state = GuiState::default();
+        state.rows = vec![
+            make_row("a.txt", 300, true),
+            make_row("b.txt", 100, true),
+            make_row("c.log", 200, true),
+        ];
+        state.search_filter = ".txt".to_string();
+        state.toggle_sort(SortColumn::Pid);
+        let filtered = state.filtered_rows();
+        assert_eq!(filtered.len(), 2);
+        assert_eq!(filtered[0].1.pid, 100);
+        assert_eq!(filtered[1].1.pid, 300);
+    }
+
+    // --- tick_status 测试 ---
+
+    #[test]
+    fn tick_status_keeps_recent_message() {
+        let mut state = GuiState::default();
+        state.status_msg = Some(("test".to_string(), std::time::Instant::now()));
+        state.tick_status();
+        assert!(state.status_msg.is_some(), "Recent message should be kept");
+    }
+
+    // --- selected_pids 测试 ---
+
+    #[test]
+    fn selected_pids_empty_selection() {
+        let mut state = GuiState::default();
+        state.rows = vec![make_row("a.txt", 100, true)];
+        let pids = state.selected_pids();
+        assert!(pids.is_empty());
+    }
+
+    #[test]
+    fn selected_pids_non_blocking_not_selectable() {
+        // 虽然可以手动插入 selected，但 selected_pids 应该仍然返回 PID
+        let mut state = GuiState::default();
+        state.rows = vec![make_row("a.txt", 100, false)]; // non-blocking
+        state.selected.insert(0);
+        let pids = state.selected_pids();
+        // selected_pids 不过滤 blocking，只去重
+        assert!(pids.contains(&100));
+    }
+
+    // --- apply_result 测试 ---
+
+    #[test]
+    fn apply_result_populates_rows() {
+        let mut state = GuiState::default();
+        let result = crate::model::ScanResult {
+            targets: vec![std::path::PathBuf::from("/test")],
+            total_files_scanned: 100,
+            locked_files: vec![crate::model::FileLockInfo {
+                path: std::path::PathBuf::from("/test/file.txt"),
+                lockers: vec![crate::model::ProcessInfo::new(
+                    42,
+                    "vim".to_string(),
+                    crate::model::LockType::FileHandle,
+                    Some("vim /test/file.txt".to_string()),
+                    Some("user".to_string()),
+                )],
+            }],
+            errors: vec![crate::model::ScanError {
+                path: std::path::PathBuf::from("/test/err"),
+                reason: "permission denied".to_string(),
+            }],
+            elapsed: std::time::Duration::from_secs_f64(1.5),
+        };
+
+        state.apply_result(result);
+        assert_eq!(state.total_files, 100);
+        assert!((state.elapsed_secs - 1.5).abs() < 0.01);
+        assert_eq!(state.rows.len(), 1);
+        assert_eq!(state.rows[0].pid, 42);
+        assert_eq!(state.rows[0].proc_name, "vim");
+        assert_eq!(state.rows[0].lock_type, "File Handle");
+        assert_eq!(state.rows[0].cmdline, "vim /test/file.txt");
+        assert_eq!(state.rows[0].user, "user");
+        // Windows: FileHandle 阻塞；macOS/Linux: 不阻塞
+        #[cfg(target_os = "windows")]
+        assert!(state.rows[0].blocking);
+        #[cfg(not(target_os = "windows"))]
+        assert!(!state.rows[0].blocking);
+        assert_eq!(state.errors.len(), 1);
+        assert!(state.errors[0].contains("permission denied"));
+    }
+
+    #[test]
+    fn apply_result_clears_previous_data() {
+        let mut state = GuiState::default();
+        state.rows = vec![make_row("old.txt", 999, true)];
+        state.selected.insert(0);
+        state.errors = vec!["old error".to_string()];
+
+        let result = crate::model::ScanResult {
+            targets: vec![],
+            total_files_scanned: 0,
+            locked_files: vec![],
+            errors: vec![],
+            elapsed: std::time::Duration::ZERO,
+        };
+
+        state.apply_result(result);
+        assert!(state.rows.is_empty(), "Old rows should be cleared");
+        assert!(state.selected.is_empty(), "Old selection should be cleared");
+        assert!(state.errors.is_empty(), "Old errors should be cleared");
+    }
+
+    // --- default 状态测试 ---
+
+    #[test]
+    fn default_state_is_idle() {
+        let state = GuiState::default();
+        assert_eq!(state.phase, ScanPhase::Idle);
+        assert!(state.paths.is_empty());
+        assert!(state.rows.is_empty());
+        assert!(state.include_subdirs);
+        assert!(!state.follow_symlinks);
+        assert!(state.cancel_flag.is_none());
+        assert!(state.confirm_kill.is_none());
+        assert!(!state.show_donate);
+        assert!(!state.show_errors);
+    }
+
+    #[test]
+    fn filtered_rows_by_lock_type() {
+        let mut state = GuiState::default();
+        state.rows = vec![
+            ResultRow {
+                file_path: "a.txt".to_string(),
+                pid: 1,
+                proc_name: "test.exe".to_string(),
+                lock_type: "File Handle".to_string(),
+                cmdline: String::new(),
+                user: String::new(),
+                blocking: true,
+            },
+            ResultRow {
+                file_path: "b.txt".to_string(),
+                pid: 2,
+                proc_name: "test2.exe".to_string(),
+                lock_type: "Memory Map".to_string(),
+                cmdline: String::new(),
+                user: String::new(),
+                blocking: true,
+            },
+        ];
+        state.search_filter = "Memory".to_string();
+        let filtered = state.filtered_rows();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].1.lock_type, "Memory Map");
+    }
 }

@@ -497,4 +497,109 @@ mod tests {
         assert!(s.contains("files"));
         assert!(s.contains("locks"));
     }
+
+    // --- 额外的 i18n 测试 ---
+
+    #[test]
+    fn confirm_title_force_vs_normal() {
+        let normal_cn = T::confirm_title(Lang::Chinese, false);
+        let force_cn = T::confirm_title(Lang::Chinese, true);
+        assert_ne!(normal_cn, force_cn, "Force and normal titles should differ");
+        assert!(force_cn.contains("强制"));
+
+        let normal_en = T::confirm_title(Lang::English, false);
+        let force_en = T::confirm_title(Lang::English, true);
+        assert_ne!(normal_en, force_en);
+        assert!(force_en.contains("Force"));
+    }
+
+    #[test]
+    fn n_selected_format_correct() {
+        let cn = T::n_selected(Lang::Chinese, 3);
+        assert!(cn.contains("3"));
+        assert!(cn.contains("项"));
+
+        let en = T::n_selected(Lang::English, 3);
+        assert!(en.contains("3"));
+        assert!(en.contains("selected"));
+    }
+
+    #[test]
+    fn n_errors_format_correct() {
+        let cn = T::n_errors(Lang::Chinese, 5);
+        assert!(cn.contains("5"));
+        assert!(cn.contains("错误"));
+
+        let en = T::n_errors(Lang::English, 5);
+        assert!(en.contains("5"));
+        assert!(en.contains("errors"));
+    }
+
+    #[test]
+    fn confirm_msg_format_correct() {
+        let cn = T::confirm_msg(Lang::Chinese, 2);
+        assert!(cn.contains("2"));
+
+        let en = T::confirm_msg(Lang::English, 2);
+        assert!(en.contains("2"));
+        assert!(en.contains("kill"));
+    }
+
+    #[test]
+    fn key_ui_strings_differ_between_languages() {
+        // 关键 UI 字符串在中英文之间应不同（避免忘记翻译）
+        assert_ne!(T::scan(Lang::Chinese), T::scan(Lang::English));
+        assert_ne!(T::kill(Lang::Chinese), T::kill(Lang::English));
+        assert_ne!(T::force_kill(Lang::Chinese), T::force_kill(Lang::English));
+        assert_ne!(T::search(Lang::Chinese), T::search(Lang::English));
+        assert_ne!(T::no_results(Lang::Chinese), T::no_results(Lang::English));
+        assert_ne!(T::select_hint(Lang::Chinese), T::select_hint(Lang::English));
+        assert_ne!(T::drop_hint(Lang::Chinese), T::drop_hint(Lang::English));
+        assert_ne!(T::cancel_scan(Lang::Chinese), T::cancel_scan(Lang::English));
+        assert_ne!(T::copy(Lang::Chinese), T::copy(Lang::English));
+        assert_ne!(T::copied(Lang::Chinese), T::copied(Lang::English));
+        assert_ne!(T::support(Lang::Chinese), T::support(Lang::English));
+        assert_ne!(
+            T::cjk_font_missing(Lang::Chinese),
+            T::cjk_font_missing(Lang::English)
+        );
+    }
+
+    #[test]
+    fn lock_type_label_all_types_translated() {
+        // 确保所有 LockType 在中文模式下都有翻译
+        let types = [
+            "File Handle",
+            "Working Dir",
+            "Executable",
+            "Memory Map",
+            "File Lock",
+            "Dir Handle",
+        ];
+        for t in types {
+            let translated = T::lock_type_label(Lang::Chinese, t);
+            assert_ne!(translated, t, "{} should be translated in Chinese", t);
+        }
+    }
+
+    #[test]
+    fn pid_label_same_for_both_languages() {
+        // PID 是通用术语，不需要翻译
+        assert_eq!(T::pid(Lang::Chinese), T::pid(Lang::English));
+        assert_eq!(T::pid(Lang::Chinese), "PID");
+    }
+
+    #[test]
+    fn depth_hint_same_for_both_languages() {
+        assert_eq!(T::depth_hint(Lang::Chinese), T::depth_hint(Lang::English));
+    }
+
+    #[test]
+    fn exclude_hint_same_for_both_languages() {
+        // 排除模式示例对两种语言应该相同（都是 glob 模式）
+        assert_eq!(
+            T::exclude_hint(Lang::Chinese),
+            T::exclude_hint(Lang::English)
+        );
+    }
 }

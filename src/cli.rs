@@ -39,6 +39,116 @@ pub fn attach_console() {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn parse_single_path() {
+        let args = CliArgs::try_parse_from(["who-locks", "/tmp/file.txt"]).unwrap();
+        assert_eq!(args.paths, vec![PathBuf::from("/tmp/file.txt")]);
+        assert!(!args.no_recursive);
+        assert!(args.depth.is_none());
+        assert!(args.exclude.is_none());
+        assert_eq!(args.format, "text");
+    }
+
+    #[test]
+    fn parse_multiple_paths() {
+        let args = CliArgs::try_parse_from(["who-locks", "/a", "/b", "/c"]).unwrap();
+        assert_eq!(args.paths.len(), 3);
+        assert_eq!(args.paths[0], PathBuf::from("/a"));
+        assert_eq!(args.paths[2], PathBuf::from("/c"));
+    }
+
+    #[test]
+    fn parse_no_recursive_short() {
+        let args = CliArgs::try_parse_from(["who-locks", "/tmp", "-n"]).unwrap();
+        assert!(args.no_recursive);
+    }
+
+    #[test]
+    fn parse_no_recursive_long() {
+        let args = CliArgs::try_parse_from(["who-locks", "/tmp", "--no-recursive"]).unwrap();
+        assert!(args.no_recursive);
+    }
+
+    #[test]
+    fn parse_depth_option() {
+        let args = CliArgs::try_parse_from(["who-locks", "/tmp", "-d", "5"]).unwrap();
+        assert_eq!(args.depth, Some(5));
+    }
+
+    #[test]
+    fn parse_depth_long() {
+        let args = CliArgs::try_parse_from(["who-locks", "/tmp", "--depth", "3"]).unwrap();
+        assert_eq!(args.depth, Some(3));
+    }
+
+    #[test]
+    fn parse_exclude_option() {
+        let args =
+            CliArgs::try_parse_from(["who-locks", "/tmp", "-e", "node_modules,*.log"]).unwrap();
+        assert_eq!(args.exclude, Some("node_modules,*.log".to_string()));
+    }
+
+    #[test]
+    fn parse_format_json() {
+        let args = CliArgs::try_parse_from(["who-locks", "/tmp", "-f", "json"]).unwrap();
+        assert_eq!(args.format, "json");
+    }
+
+    #[test]
+    fn parse_format_default_is_text() {
+        let args = CliArgs::try_parse_from(["who-locks", "/tmp"]).unwrap();
+        assert_eq!(args.format, "text");
+    }
+
+    #[test]
+    fn parse_all_options_combined() {
+        let args = CliArgs::try_parse_from([
+            "who-locks",
+            "/project",
+            "/other",
+            "-n",
+            "-d",
+            "2",
+            "-e",
+            ".git,target",
+            "-f",
+            "json",
+        ])
+        .unwrap();
+        assert_eq!(args.paths.len(), 2);
+        assert!(args.no_recursive);
+        assert_eq!(args.depth, Some(2));
+        assert_eq!(args.exclude, Some(".git,target".to_string()));
+        assert_eq!(args.format, "json");
+    }
+
+    #[test]
+    fn parse_missing_paths_fails() {
+        let result = CliArgs::try_parse_from(["who-locks"]);
+        assert!(result.is_err(), "Should fail without required paths");
+    }
+
+    #[test]
+    fn parse_windows_path() {
+        let args = CliArgs::try_parse_from(["who-locks", "C:\\Users\\test\\file.txt"]).unwrap();
+        assert_eq!(args.paths, vec![PathBuf::from("C:\\Users\\test\\file.txt")]);
+    }
+
+    #[test]
+    fn parse_path_with_spaces() {
+        let args = CliArgs::try_parse_from(["who-locks", "/path/with spaces/file.txt"]).unwrap();
+        assert_eq!(
+            args.paths,
+            vec![PathBuf::from("/path/with spaces/file.txt")]
+        );
+    }
+}
+
 pub fn run_cli() {
     let args = CliArgs::parse();
 

@@ -1212,4 +1212,104 @@ mod tests {
                 .zip(pattern_chars.iter())
                 .all(|(n, p)| *p == '?' || *n == *p)
     }
+
+    // --- 额外的 handle.exe 解析测试 ---
+
+    #[test]
+    fn extract_handle_path_with_spaces() {
+        let line = "notepad.exe        pid: 1234  type: File  1C8: C:\\Users\\My User\\My File.txt";
+        assert_eq!(
+            extract_handle_path(line),
+            Some("C:\\Users\\My User\\My File.txt".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_handle_path_empty_after_hex() {
+        // hex 后面只有冒号和空白，没有实际路径
+        let line = "proc.exe           pid: 1  type: File  ABC:   ";
+        let result = extract_handle_path(line);
+        assert!(result.is_none(), "Empty path after hex should return None");
+    }
+
+    #[test]
+    fn extract_handle_path_long_hex() {
+        let line = "proc.exe           pid: 1  type: File  ABCDEF12: C:\\long\\hex\\handle";
+        assert_eq!(
+            extract_handle_path(line),
+            Some("C:\\long\\hex\\handle".to_string())
+        );
+    }
+
+    // --- decode_system_output 额外测试 ---
+
+    #[test]
+    fn decode_system_output_mixed_ascii_and_newlines() {
+        let bytes = b"Line 1\r\nLine 2\r\n";
+        let result = decode_system_output(bytes);
+        assert!(result.contains("Line 1"));
+        assert!(result.contains("Line 2"));
+    }
+
+    // --- strip_extended_prefix 额外测试 ---
+
+    #[test]
+    fn strip_extended_prefix_unc() {
+        // UNC 路径不应被误剥离（\\server\share 不同于 \\?\）
+        let path = PathBuf::from("\\\\server\\share\\file.txt");
+        let result = strip_extended_prefix(&path);
+        assert_eq!(result, PathBuf::from("\\\\server\\share\\file.txt"));
+    }
+
+    #[test]
+    fn strip_extended_prefix_extended_unc() {
+        // \\?\UNC\server\share 形式
+        let path = PathBuf::from("\\\\?\\C:\\Windows\\System32");
+        let result = strip_extended_prefix(&path);
+        assert_eq!(result, PathBuf::from("C:\\Windows\\System32"));
+    }
+
+    // --- wide_string 额外测试 ---
+
+    #[test]
+    fn wide_to_string_empty() {
+        let wide: Vec<u16> = vec![0x0000];
+        assert_eq!(wide_to_string(&wide), "");
+    }
+
+    #[test]
+    fn wide_to_string_no_null() {
+        let wide = vec![0x0041, 0x0042, 0x0043]; // "ABC" without null terminator
+        assert_eq!(wide_to_string(&wide), "ABC");
+    }
+
+    #[test]
+    fn to_wide_string_null_terminated() {
+        let path = PathBuf::from("test");
+        let wide = to_wide_string(&path);
+        assert_eq!(*wide.last().unwrap(), 0, "Should be null terminated");
+    }
+
+    // --- match_dir_entry_pattern 额外测试 ---
+
+    #[test]
+    fn match_dir_entry_all_wildcards() {
+        assert!(match_dir_entry_pattern("abc", "???"));
+        assert!(!match_dir_entry_pattern("abcd", "???"));
+        assert!(!match_dir_entry_pattern("ab", "???"));
+    }
+
+    #[test]
+    fn match_dir_entry_mixed_wildcards() {
+        assert!(match_dir_entry_pattern("test.txt", "te?t.txt"));
+        assert!(match_dir_entry_pattern("test.txt", "????.txt"));
+        assert!(!match_dir_entry_pattern("test.txt", "???.txt"));
+    }
+
+    #[test]
+    fn match_dir_entry_chinese_name_pattern() {
+        // 模拟中文文件名与 ? 通配符模式匹配
+        assert!(match_dir_entry_pattern("文件.txt", "??.txt"));
+        assert!(!match_dir_entry_pattern("文件名.txt", "??.txt"));
+    }
 }

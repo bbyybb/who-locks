@@ -211,4 +211,125 @@ mod tests {
         );
         let _ = std::fs::remove_file(&tmp);
     }
+
+    // --- 额外的导出测试 ---
+
+    #[test]
+    fn export_json_empty_rows() {
+        let tmp = std::env::temp_dir().join("who-locks-test-json-empty.json");
+        export_json(&[], &tmp).unwrap();
+        let content = std::fs::read_to_string(&tmp).unwrap();
+        assert!(
+            content.contains("[]"),
+            "Empty rows should produce empty JSON array"
+        );
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn export_csv_empty_rows() {
+        let tmp = std::env::temp_dir().join("who-locks-test-csv-empty.csv");
+        export_csv(&[], &tmp).unwrap();
+        let content = std::fs::read_to_string(&tmp).unwrap();
+        assert!(
+            content.contains("file_path,pid"),
+            "Empty CSV should still have header"
+        );
+        // 只有 BOM + header，没有数据行
+        let lines: Vec<&str> = content.trim().lines().collect();
+        assert_eq!(lines.len(), 1, "Should only have header line");
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn sanitize_csv_value_tab() {
+        assert_eq!(super::sanitize_csv_value("\tdata"), "'\tdata");
+    }
+
+    #[test]
+    fn sanitize_csv_value_newlines() {
+        assert_eq!(super::sanitize_csv_value("\rdata"), "'\rdata");
+        assert_eq!(super::sanitize_csv_value("\ndata"), "'\ndata");
+    }
+
+    #[test]
+    fn sanitize_csv_value_empty() {
+        assert_eq!(super::sanitize_csv_value(""), "");
+    }
+
+    #[test]
+    fn export_json_structure() {
+        let rows = make_test_rows();
+        let tmp = std::env::temp_dir().join("who-locks-test-json-structure.json");
+        export_json(&rows, &tmp).unwrap();
+        let bytes = std::fs::read(&tmp).unwrap();
+        // 跳过 BOM
+        let json_str = std::str::from_utf8(&bytes[3..]).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(json_str).unwrap();
+        assert!(parsed.is_array());
+        let arr = parsed.as_array().unwrap();
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0]["pid"], 1234);
+        assert_eq!(arr[0]["process_name"], "notepad.exe");
+        assert_eq!(arr[0]["lock_type"], "File Handle");
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn export_csv_multiple_rows() {
+        let rows = vec![
+            ResultRow {
+                file_path: "a.txt".to_string(),
+                pid: 1,
+                proc_name: "proc_a".to_string(),
+                lock_type: "File Handle".to_string(),
+                cmdline: "cmd_a".to_string(),
+                user: "user_a".to_string(),
+                blocking: true,
+            },
+            ResultRow {
+                file_path: "b.txt".to_string(),
+                pid: 2,
+                proc_name: "proc_b".to_string(),
+                lock_type: "Working Dir".to_string(),
+                cmdline: String::new(),
+                user: String::new(),
+                blocking: true,
+            },
+        ];
+        let tmp = std::env::temp_dir().join("who-locks-test-csv-multi.csv");
+        export_csv(&rows, &tmp).unwrap();
+        let content = std::fs::read_to_string(&tmp).unwrap();
+        let lines: Vec<&str> = content.trim().lines().collect();
+        assert_eq!(lines.len(), 3, "Should have header + 2 data lines");
+        assert!(lines[1].contains("proc_a"));
+        assert!(lines[2].contains("proc_b"));
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn export_json_preserves_all_fields() {
+        let rows = vec![ResultRow {
+            file_path: "/path/to/file".to_string(),
+            pid: 42,
+            proc_name: "my-process".to_string(),
+            lock_type: "Memory Map".to_string(),
+            cmdline: "my-process --flag".to_string(),
+            user: "admin".to_string(),
+            blocking: true,
+        }];
+        let tmp = std::env::temp_dir().join("who-locks-test-json-fields.json");
+        export_json(&rows, &tmp).unwrap();
+        let bytes = std::fs::read(&tmp).unwrap();
+        let json_str = std::str::from_utf8(&bytes[3..]).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(json_str).unwrap();
+        let item = &parsed[0];
+        assert_eq!(item["file_path"], "/path/to/file");
+        assert_eq!(item["pid"], 42);
+        assert_eq!(item["process_name"], "my-process");
+        assert_eq!(item["lock_type"], "Memory Map");
+        assert_eq!(item["command_line"], "my-process --flag");
+        assert_eq!(item["user"], "admin");
+        let _ = std::fs::remove_file(&tmp);
+    }
 }
